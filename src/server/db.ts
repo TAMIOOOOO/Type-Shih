@@ -6,7 +6,47 @@ class InMemoryDB {
   private gameResults: DBGameResult[] = [];
 
   constructor() {
+    this.loadFromStorage();
+  }
+
+  private loadFromStorage() {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const savedUsers = localStorage.getItem('typing_speed_db_users');
+        const savedGames = localStorage.getItem('typing_speed_db_games');
+
+        if (savedUsers) {
+          const parsedUsers: DBUser[] = JSON.parse(savedUsers);
+          for (const u of parsedUsers) {
+            this.users.set(u.id, u);
+          }
+        }
+        if (savedGames) {
+          this.gameResults = JSON.parse(savedGames);
+        }
+        if (this.users.size > 0) {
+          return;
+        }
+      } catch (err) {
+        console.warn('Could not load from localStorage:', err);
+      }
+    }
+
     this.seedInitialData();
+  }
+
+  private saveToStorage() {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        localStorage.setItem(
+          'typing_speed_db_users',
+          JSON.stringify(Array.from(this.users.values()))
+        );
+        localStorage.setItem('typing_speed_db_games', JSON.stringify(this.gameResults));
+      } catch (err) {
+        console.warn('Could not save to localStorage:', err);
+      }
+    }
   }
 
   private async seedInitialData() {
@@ -83,6 +123,7 @@ class InMemoryDB {
       bestScore: null,
     };
     this.users.set(id, newUser);
+    this.saveToStorage();
     return newUser;
   }
 
@@ -126,6 +167,7 @@ class InMemoryDB {
     };
 
     this.gameResults.unshift(gameResult);
+    this.saveToStorage();
 
     return { result: gameResult, isNewBestScore };
   }
