@@ -1,0 +1,51 @@
+// Prisma Schema for Typing Speed Game Application
+// Database: PostgreSQL with relations for Users and Game Results
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  username     String       @unique
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Best score in seconds (lower is better, null if no games completed)
+  bestScore    Float?
+
+  // Relations
+  gameResults  GameResult[]
+
+  @@map("users")
+}
+
+model GameResult {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Timing metrics (in seconds)
+  totalTime      Float    // Total completion time including penalty (rawTime + penaltyTime)
+  rawTime        Float    // Base typing duration without penalties
+  penaltyTime    Float    // Accumulated penalty (wrongAttempts * 0.5s)
+
+  // Gameplay metrics
+  correctChars   Int      @default(20) // Requirement: 20 randomly generated alphabets
+  wrongAttempts  Int      @default(0)  // Number of incorrect key presses
+  sequence       String   // The 20-character target sequence played
+  isNewBestScore Boolean  @default(false)
+
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([totalTime]) // For fast leaderboard ranking queries
+  @@map("game_results")
+}

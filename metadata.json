@@ -1,0 +1,6 @@
+{
+  "name": "type-shih",
+  "description": "Full-stack 20-alphabet typing speed challenge with GraphQL Yoga backend, PostgreSQL/Prisma modeling, authentication, local & global leaderboards, and penalty scoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
