@@ -21,7 +21,7 @@ export const yoga = createYoga({
       const token = authHeader.substring(7);
       const decoded = verifyToken(token);
       if (decoded && decoded.userId) {
-        const user = db.findUserById(decoded.userId);
+        const user = db.upsertUserFromToken(decoded);
         if (user) {
           return { user };
         }

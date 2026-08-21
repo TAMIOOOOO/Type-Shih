@@ -127,6 +127,26 @@ class InMemoryDB {
     return newUser;
   }
 
+  public upsertUserFromToken(decoded: { userId: string; username?: string; email?: string }): DBUser {
+    const existing = this.findUserById(decoded.userId);
+    if (existing) return existing;
+
+    const username = decoded.username || `User_${decoded.userId.slice(-4)}`;
+    const email = decoded.email || `${username.toLowerCase()}@local.dev`;
+
+    const newUser: DBUser = {
+      id: decoded.userId,
+      username,
+      email,
+      passwordHash: '',
+      createdAt: new Date().toISOString(),
+      bestScore: null,
+    };
+    this.users.set(decoded.userId, newUser);
+    this.saveToStorage();
+    return newUser;
+  }
+
   // Game Result operations
   public saveGameResult(params: {
     userId: string;

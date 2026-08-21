@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { GameStatus, GameSummary, User, Theme } from '../types.js';
 import { playKeySound, playErrorSound, playSuccessSound, playFinishSound } from '../lib/sound.js';
-import { executeGraphQL, SAVE_GAME_MUTATION } from '../lib/graphqlClient.js';
+import { executeGraphQL, SAVE_GAME_MUTATION, getAuthToken } from '../lib/graphqlClient.js';
 import { getRandomWords } from '../lib/wordBank.js';
 
 interface GameArenaProps {
@@ -229,8 +229,9 @@ export const GameArena: React.FC<GameArenaProps> = ({
         playFinishSound(isMuted);
       }
 
-      // Save result to GraphQL backend if logged in
-      if (currentUser) {
+      // Save result to GraphQL backend if logged in and token is active
+      const token = getAuthToken();
+      if (currentUser && token) {
         setIsSavingToBackend(true);
         setSaveError(null);
         try {
@@ -243,7 +244,7 @@ export const GameArena: React.FC<GameArenaProps> = ({
             },
           });
         } catch (err: any) {
-          console.error('Failed to sync game to GraphQL backend:', err);
+          // Log user-friendly notice without breaking game completion
           setSaveError(err?.message || 'Failed to sync with server');
         } finally {
           setIsSavingToBackend(false);

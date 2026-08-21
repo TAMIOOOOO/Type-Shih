@@ -28,7 +28,7 @@ async function executeLocalGraphQL<T = any>(
   if (token) {
     const decoded = verifyToken(token);
     if (decoded && decoded.userId) {
-      user = db.findUserById(decoded.userId);
+      user = db.upsertUserFromToken(decoded);
     }
   }
 
