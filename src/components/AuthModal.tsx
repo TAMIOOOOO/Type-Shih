@@ -40,26 +40,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const primaryInputRef = useRef<HTMLInputElement>(null);
 
-  // Focus primary input whenever modal opens or tab changes
+  const clearAllInputs = () => {
+    setUsername('');
+    setEmail('');
+    setLoginIdentifier('');
+    setPassword('');
+    setConfirmPassword('');
+    setShowPassword(false);
+    setErrorMessage(null);
+    setActiveDemo(null);
+  };
+
+  const handleClose = () => {
+    clearAllInputs();
+    onClose();
+  };
+
+  // Focus primary input and reset state whenever modal opens or tab changes
   useEffect(() => {
     if (isOpen) {
+      clearAllInputs();
       const timer = setTimeout(() => {
         primaryInputRef.current?.focus();
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, isRegister]);
+  }, [isOpen]);
 
   // Handle escape key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
-        onClose();
+        handleClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -118,6 +135,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         const { token, user } = data.register;
         setAuthToken(token);
+        clearAllInputs();
         onAuthSuccess(user);
         onClose();
       } else {
@@ -138,6 +156,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         const { token, user } = data.login;
         setAuthToken(token);
+        clearAllInputs();
         onAuthSuccess(user);
         onClose();
       }
@@ -161,6 +180,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       });
       const { token, user } = data.login;
       setAuthToken(token);
+      clearAllInputs();
       onAuthSuccess(user);
       onClose();
     } catch (err: any) {
@@ -175,7 +195,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm animate-fadeIn"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
     >
       <div
@@ -187,7 +207,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Close Button */}
         <button
           id="btn-close-auth-modal"
-          onClick={onClose}
+          onClick={handleClose}
           type="button"
           aria-label="Close authentication modal"
           className={`absolute right-4 top-4 rounded-lg p-1.5 transition ${

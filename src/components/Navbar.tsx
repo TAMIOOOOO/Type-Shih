@@ -52,10 +52,15 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div
           id="brand-logo"
           onClick={() => setActiveTab('game')}
-          className="flex cursor-pointer items-center space-x-3 transition hover:opacity-90"
+          className="flex cursor-pointer items-center space-x-2.5 transition hover:opacity-90 group"
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#F27D26]/40 bg-[#F27D26]/10 text-[#F27D26] shadow-sm shadow-[#F27D26]/20">
-            <Zap className="h-4 w-4 fill-current" />
+          <div className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-zinc-900 shadow-md shadow-[#F27D26]/10 transition-transform group-hover:scale-105">
+            <img
+              src="/ts-logo.svg"
+              alt="TS Logo"
+              className="h-full w-full object-contain p-0.5"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <div>
             <div className="flex items-center space-x-2">
