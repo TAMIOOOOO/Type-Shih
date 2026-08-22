@@ -261,75 +261,163 @@ class InMemoryDB {
     }, userGames[0]);
   }
 
-  // Leaderboard with best score per player (Rank, Player, Best Time)
-  public getLeaderboard(limit = 20): LeaderboardEntry[] {
-    const userBestMap = new Map<string, { user: DBUser; bestGame: DBGameResult; count: number }>();
+  // Leaderboard with strictly the single best score per user (Rank, Player, Best Time, Accuracy, WPM)
+  public getLeaderboard(
+    limit = 50,
+    timeframe: 'ALL_TIME' | 'TODAY' | 'WEEK' | 'MONTH' = 'ALL_TIME'
+  ): LeaderboardEntry[] {
+    const now = Date.now();
+    let timeframeCutoff = 0;
+    if (timeframe === 'TODAY') {
+      timeframeCutoff = now - 24 * 60 * 60 * 1000;
+    } else if (timeframe === 'WEEK') {
+      timeframeCutoff = now - 7 * 24 * 60 * 60 * 1000;
+    } else if (timeframe === 'MONTH') {
+      timeframeCutoff = now - 30 * 24 * 60 * 60 * 1000;
+    }
+
+    interface UserAgg {
+      user: DBUser;
+      bestGame: DBGameResult | null;
+      bestTime: number;
+      rawTime: number;
+      penaltyTime: number;
+      wrongAttempts: number;
+      accuracy: number;
+      wpm: number;
+      count: number;
+      lastPlayed: string;
+      achievedAt: string;
+    }
+
+    const userBestMap = new Map<string, UserAgg>();
 
     for (const game of this.gameResults) {
       const user = this.findUserById(game.userId);
       if (!user) continue;
 
+      const gameTime = new Date(game.createdAt).getTime();
+      if (timeframeCutoff > 0 && gameTime < timeframeCutoff) {
+        continue;
+      }
+
+      // Calculate accuracy and WPM for this game run
+      const correct = game.correctChars || 20;
+      const totalKeypresses = correct + (game.wrongAttempts || 0);
+      const acc = totalKeypresses > 0 ? Number(((correct / totalKeypresses) * 100).toFixed(1)) : 100;
+      const words = correct / 5;
+      const minutes = Math.max(game.totalTime, 0.1) / 60;
+      const calcWpm = Number((words / minutes).toFixed(1));
+
       const existing = userBestMap.get(game.userId);
       if (!existing) {
-        userBestMap.set(game.userId, { user, bestGame: game, count: 1 });
+        userBestMap.set(game.userId, {
+          user,
+          bestGame: game,
+          bestTime: game.totalTime,
+          rawTime: game.rawTime,
+          penaltyTime: game.penaltyTime,
+          wrongAttempts: game.wrongAttempts,
+          accuracy: acc,
+          wpm: calcWpm,
+          count: 1,
+          lastPlayed: game.createdAt,
+          achievedAt: game.createdAt,
+        });
       } else {
         existing.count += 1;
-        if (game.totalTime < existing.bestGame.totalTime) {
+        // Compare with existing best for this user
+        // 1. Lower totalTime wins
+        // 2. Tie-break: Lower penalty / wrong attempts wins
+        const isBetter =
+          game.totalTime < existing.bestTime ||
+          (game.totalTime === existing.bestTime && game.wrongAttempts < existing.wrongAttempts);
+
+        if (isBetter) {
           existing.bestGame = game;
+          existing.bestTime = game.totalTime;
+          existing.rawTime = game.rawTime;
+          existing.penaltyTime = game.penaltyTime;
+          existing.wrongAttempts = game.wrongAttempts;
+          existing.accuracy = acc;
+          existing.wpm = calcWpm;
+          existing.achievedAt = game.createdAt;
+        }
+
+        if (new Date(game.createdAt) > new Date(existing.lastPlayed)) {
+          existing.lastPlayed = game.createdAt;
         }
       }
     }
 
-    // Sort ascending by bestTime (lower time = higher rank)
-    const sorted = Array.from(userBestMap.values()).sort(
-      (a, b) => a.bestGame.totalTime - b.bestGame.totalTime
-    );
+    // For ALL_TIME only, also consider users who have a bestScore in their profile
+    if (timeframe === 'ALL_TIME') {
+      for (const user of this.users.values()) {
+        if (user.bestScore !== null && !userBestMap.has(user.id)) {
+          const words = 20 / 5;
+          const minutes = Math.max(user.bestScore, 0.1) / 60;
+          const calcWpm = Number((words / minutes).toFixed(1));
+
+          userBestMap.set(user.id, {
+            user,
+            bestGame: null,
+            bestTime: user.bestScore,
+            rawTime: user.bestScore,
+            penaltyTime: 0,
+            wrongAttempts: 0,
+            accuracy: 100,
+            wpm: calcWpm,
+            count: 1,
+            lastPlayed: user.createdAt,
+            achievedAt: user.createdAt,
+          });
+        }
+      }
+    }
+
+    // Sort strictly:
+    // 1. bestTime ascending (lowest completion time wins rank #1)
+    // 2. penaltyTime ascending (fewer mistakes / cleaner run breaks tie)
+    // 3. achievedAt ascending (earlier achiever holds rank position)
+    // 4. count descending (more matches played)
+    const sorted = Array.from(userBestMap.values()).sort((a, b) => {
+      if (a.bestTime !== b.bestTime) {
+        return a.bestTime - b.bestTime;
+      }
+      if (a.penaltyTime !== b.penaltyTime) {
+        return a.penaltyTime - b.penaltyTime;
+      }
+      const timeA = new Date(a.achievedAt).getTime();
+      const timeB = new Date(b.achievedAt).getTime();
+      if (timeA !== timeB) {
+        return timeA - timeB;
+      }
+      return b.count - a.count;
+    });
 
     return sorted.slice(0, limit).map((entry, index) => ({
       rank: index + 1,
       userId: entry.user.id,
       player: entry.user.username,
-      bestTime: entry.bestGame.totalTime,
+      bestTime: entry.bestTime,
+      rawTime: entry.rawTime,
+      penaltyTime: entry.penaltyTime,
+      wrongAttempts: entry.wrongAttempts,
+      accuracy: entry.accuracy,
+      wpm: entry.wpm,
       totalGames: entry.count,
-      lastPlayed: entry.bestGame.createdAt,
+      lastPlayed: entry.lastPlayed,
     }));
   }
 
-  // Get specific user's rank across all players
-  public getUserRank(userId: string): LeaderboardEntry | null {
-    const userBestMap = new Map<string, { user: DBUser; bestGame: DBGameResult; count: number }>();
-
-    for (const game of this.gameResults) {
-      const user = this.findUserById(game.userId);
-      if (!user) continue;
-
-      const existing = userBestMap.get(game.userId);
-      if (!existing) {
-        userBestMap.set(game.userId, { user, bestGame: game, count: 1 });
-      } else {
-        existing.count += 1;
-        if (game.totalTime < existing.bestGame.totalTime) {
-          existing.bestGame = game;
-        }
-      }
-    }
-
-    const sorted = Array.from(userBestMap.values()).sort(
-      (a, b) => a.bestGame.totalTime - b.bestGame.totalTime
-    );
-
-    const index = sorted.findIndex((e) => e.user.id === userId);
-    if (index === -1) return null;
-
-    const entry = sorted[index];
-    return {
-      rank: index + 1,
-      userId: entry.user.id,
-      player: entry.user.username,
-      bestTime: entry.bestGame.totalTime,
-      totalGames: entry.count,
-      lastPlayed: entry.bestGame.createdAt,
-    };
+  // Get specific user's rank across all players based on their best score
+  public getUserRank(
+    userId: string,
+    timeframe: 'ALL_TIME' | 'TODAY' | 'WEEK' | 'MONTH' = 'ALL_TIME'
+  ): LeaderboardEntry | null {
+    const fullLeaderboard = this.getLeaderboard(2000, timeframe);
+    const userEntry = fullLeaderboard.find((e) => e.userId === userId);
+    return userEntry || null;
   }
 
   // Global aggregate stats

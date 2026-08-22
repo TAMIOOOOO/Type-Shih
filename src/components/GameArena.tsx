@@ -243,6 +243,16 @@ export const GameArena: React.FC<GameArenaProps> = ({
               correctChars: seqLen,
             },
           });
+
+          // Broadcast real-time sync notification across tabs and components
+          try {
+            window.dispatchEvent(new CustomEvent('typing_speed_leaderboard_sync'));
+            if (typeof BroadcastChannel !== 'undefined') {
+              const channel = new BroadcastChannel('typing_speed_sync_channel');
+              channel.postMessage({ type: 'MATCH_COMPLETED', timestamp: Date.now() });
+              channel.close();
+            }
+          } catch {}
         } catch (err: any) {
           // Log user-friendly notice without breaking game completion
           setSaveError(err?.message || 'Failed to sync with server');

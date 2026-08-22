@@ -33,6 +33,11 @@ export const typeDefs = /* GraphQL */ `
     userId: String!
     player: String!
     bestTime: Float!
+    rawTime: Float
+    penaltyTime: Float
+    wrongAttempts: Int
+    accuracy: Float
+    wpm: Float
     totalGames: Int!
     lastPlayed: String!
   }
@@ -77,8 +82,8 @@ export const typeDefs = /* GraphQL */ `
     me: User
     gameHistory(limit: Int): [GameResult!]!
     userBestScore: GameResult
-    leaderboard(limit: Int): [LeaderboardEntry!]!
-    myRank: LeaderboardEntry
+    leaderboard(limit: Int, timeframe: String): [LeaderboardEntry!]!
+    myRank(timeframe: String): LeaderboardEntry
     stats: GlobalStats!
   }
 
@@ -120,13 +125,20 @@ export const resolvers = {
       return db.getUserBestScore(context.user.id);
     },
 
-    leaderboard: (_: unknown, { limit }: { limit?: number }) => {
-      return db.getLeaderboard(limit || 50);
+    leaderboard: (
+      _: unknown,
+      { limit, timeframe }: { limit?: number; timeframe?: 'ALL_TIME' | 'TODAY' | 'WEEK' | 'MONTH' }
+    ) => {
+      return db.getLeaderboard(limit || 50, timeframe || 'ALL_TIME');
     },
 
-    myRank: (_: unknown, __: unknown, context: AuthContext) => {
+    myRank: (
+      _: unknown,
+      { timeframe }: { timeframe?: 'ALL_TIME' | 'TODAY' | 'WEEK' | 'MONTH' },
+      context: AuthContext
+    ) => {
       if (!context.user) return null;
-      return db.getUserRank(context.user.id);
+      return db.getUserRank(context.user.id, timeframe || 'ALL_TIME');
     },
 
     stats: () => {

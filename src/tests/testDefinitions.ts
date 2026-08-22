@@ -316,10 +316,40 @@ export async function runAllTests(): Promise<TestResult[]> {
       wrongAttempts: 0,
       sequence: 'ABCDEFGHIJKLMNOPQRST',
     });
+    // u2 plays again with a slower score: 9.0s -> best remains 7.5s
+    db.saveGameResult({
+      userId: u2.id,
+      rawTime: 9.0,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+    // u1 plays again with a faster score: 6.2s -> becomes new best for u1
+    db.saveGameResult({
+      userId: u1.id,
+      rawTime: 6.2,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
 
     const leaderboard = db.getLeaderboard(100);
     if (!Array.isArray(leaderboard) || leaderboard.length === 0) {
       throw new Error('Leaderboard should return ranked list of players');
+    }
+
+    // Verify only 1 entry per user exists on the leaderboard
+    const u1Entries = leaderboard.filter((e) => e.userId === u1.id);
+    const u2Entries = leaderboard.filter((e) => e.userId === u2.id);
+    if (u1Entries.length !== 1) {
+      throw new Error(`Expected exactly 1 leaderboard entry for user 1, found ${u1Entries.length}`);
+    }
+    if (u2Entries.length !== 1) {
+      throw new Error(`Expected exactly 1 leaderboard entry for user 2, found ${u2Entries.length}`);
+    }
+    if (u1Entries[0].bestTime !== 6.2) {
+      throw new Error(`User 1 best time should be updated to 6.2s, found ${u1Entries[0].bestTime}s`);
+    }
+    if (u2Entries[0].bestTime !== 7.5) {
+      throw new Error(`User 2 best time should remain 7.5s, found ${u2Entries[0].bestTime}s`);
     }
 
     // Verify strictly sorted in ascending order of bestTime
@@ -336,8 +366,57 @@ export async function runAllTests(): Promise<TestResult[]> {
       }
     }
 
+    // ---------------------------------------------------------------------------
+    // Verify Tie-Breaking Logic: Equal totalTime with fewer wrong attempts wins tie
+    // ---------------------------------------------------------------------------
+    const uTieA = db.createUser({
+      username: `TieUserA_${Date.now()}`,
+      email: `tie_a_${Date.now()}@test.com`,
+      passwordHash: 'dummy-hash',
+    });
+    const uTieB = db.createUser({
+      username: `TieUserB_${Date.now()}`,
+      email: `tie_b_${Date.now()}@test.com`,
+      passwordHash: 'dummy-hash',
+    });
+
+    // Both achieve totalTime 5.0s:
+    // uTieA had 0 mistakes (raw 5.0 + 0 penalty = 5.0s) -> 100% accuracy
+    // uTieB had 2 mistakes (raw 4.0 + 1.0 penalty = 5.0s) -> lower accuracy
+    db.saveGameResult({
+      userId: uTieA.id,
+      rawTime: 5.0,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+    db.saveGameResult({
+      userId: uTieB.id,
+      rawTime: 4.0,
+      wrongAttempts: 2,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+
+    const lbWithTie = db.getLeaderboard(100);
+    const tieAEntry = lbWithTie.find((e) => e.userId === uTieA.id);
+    const tieBEntry = lbWithTie.find((e) => e.userId === uTieB.id);
+
+    if (!tieAEntry || !tieBEntry) {
+      throw new Error('Expected both tie test users to be present on leaderboard');
+    }
+    if (tieAEntry.rank >= tieBEntry.rank) {
+      throw new Error(
+        `Tie-breaker failed: User A with 0 penalties (rank ${tieAEntry.rank}) should rank ahead of User B with penalties (rank ${tieBEntry.rank})`
+      );
+    }
+    if (tieAEntry.accuracy !== 100) {
+      throw new Error(`Expected 100% accuracy for clean run, got ${tieAEntry.accuracy}`);
+    }
+    if (!tieAEntry.wpm || tieAEntry.wpm <= 0) {
+      throw new Error(`Expected valid calculated WPM on leaderboard entry, got ${tieAEntry.wpm}`);
+    }
+
     // Verify user ranking calculation
-    const topEntry = leaderboard[0];
+    const topEntry = lbWithTie[0];
     const userRank = db.getUserRank(topEntry.userId);
     if (!userRank || userRank.rank !== 1) {
       throw new Error(`Expected rank 1 for top player, got ${userRank?.rank}`);

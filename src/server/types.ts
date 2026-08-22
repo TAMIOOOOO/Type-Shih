@@ -30,6 +30,11 @@ export interface LeaderboardEntry {
   userId: string;
   player: string; // username
   bestTime: number; // in seconds (e.g. 8.42)
+  rawTime?: number;
+  penaltyTime?: number;
+  wrongAttempts?: number;
+  accuracy?: number; // percentage, e.g. 95.2
+  wpm?: number; // words per minute
   totalGames: number;
   lastPlayed: string;
 }

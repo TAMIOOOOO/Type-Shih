@@ -129,20 +129,30 @@ export const ME_QUERY = /* GraphQL */ `
 `;
 
 export const LEADERBOARD_QUERY = /* GraphQL */ `
-  query GetLeaderboard($limit: Int) {
-    leaderboard(limit: $limit) {
+  query GetLeaderboard($limit: Int, $timeframe: String) {
+    leaderboard(limit: $limit, timeframe: $timeframe) {
       rank
       userId
       player
       bestTime
+      rawTime
+      penaltyTime
+      wrongAttempts
+      accuracy
+      wpm
       totalGames
       lastPlayed
     }
-    myRank {
+    myRank(timeframe: $timeframe) {
       rank
       userId
       player
       bestTime
+      rawTime
+      penaltyTime
+      wrongAttempts
+      accuracy
+      wpm
       totalGames
       lastPlayed
     }

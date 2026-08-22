@@ -29,6 +29,11 @@ export interface LeaderboardEntry {
   userId: string;
   player: string;
   bestTime: number;
+  rawTime?: number;
+  penaltyTime?: number;
+  wrongAttempts?: number;
+  accuracy?: number;
+  wpm?: number;
   totalGames: number;
   lastPlayed: string;
 }
