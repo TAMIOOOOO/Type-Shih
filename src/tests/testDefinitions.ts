@@ -292,6 +292,31 @@ export async function runAllTests(): Promise<TestResult[]> {
   // 7. Leaderboard Ordering
   // ---------------------------------------------------------------------------
   await test('Leaderboard Ordering', 'Ranks players strictly ascending by lowest completion time', () => {
+    // Seed temporary users for leaderboard sorting verification
+    const u1 = db.createUser({
+      username: `RankTesterA_${Date.now()}`,
+      email: `rank_a_${Date.now()}@test.com`,
+      passwordHash: 'dummy-hash',
+    });
+    const u2 = db.createUser({
+      username: `RankTesterB_${Date.now()}`,
+      email: `rank_b_${Date.now()}@test.com`,
+      passwordHash: 'dummy-hash',
+    });
+
+    db.saveGameResult({
+      userId: u1.id,
+      rawTime: 12.0,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+    db.saveGameResult({
+      userId: u2.id,
+      rawTime: 7.5,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+
     const leaderboard = db.getLeaderboard(100);
     if (!Array.isArray(leaderboard) || leaderboard.length === 0) {
       throw new Error('Leaderboard should return ranked list of players');

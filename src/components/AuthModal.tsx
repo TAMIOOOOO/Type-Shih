@@ -36,7 +36,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [activeDemo, setActiveDemo] = useState<string | null>(null);
 
   const primaryInputRef = useRef<HTMLInputElement>(null);
 
@@ -48,7 +47,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setConfirmPassword('');
     setShowPassword(false);
     setErrorMessage(null);
-    setActiveDemo(null);
   };
 
   const handleClose = () => {
@@ -164,30 +162,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrorMessage(err?.message || 'Authentication failed');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleDemoLogin = async (demoUsername: string) => {
-    setErrorMessage(null);
-    setActiveDemo(demoUsername);
-    setIsLoading(true);
-    try {
-      const data = await executeGraphQL(LOGIN_MUTATION, {
-        input: {
-          login: demoUsername,
-          password: 'Password123!',
-        },
-      });
-      const { token, user } = data.login;
-      setAuthToken(token);
-      clearAllInputs();
-      onAuthSuccess(user);
-      onClose();
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Demo login failed');
-    } finally {
-      setIsLoading(false);
-      setActiveDemo(null);
     }
   };
 
@@ -388,7 +362,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     setLoginIdentifier(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  placeholder="alex@example.com or Alex"
+                  placeholder="typist@example.com or TypistHandle"
                   className={`w-full rounded-xl border pl-10 pr-4 py-2.5 text-sm transition focus:border-[#F27D26] focus:outline-none focus:ring-1 focus:ring-[#F27D26] ${
                     isDark
                       ? 'border-white/10 bg-[#0C0C0C] text-white placeholder-white/25'
@@ -499,63 +473,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             )}
           </button>
         </form>
-
-        {/* Quick Demo Test Accounts for Fast Evaluation */}
-        <div
-          className={`mt-6 border-t pt-4 ${
-            isDark ? 'border-white/10' : 'border-zinc-200'
-          }`}
-        >
-          <div
-            className={`text-[10px] uppercase tracking-[0.15em] font-medium mb-2 flex items-center justify-between ${
-              isDark ? 'text-white/40' : 'text-zinc-500'
-            }`}
-          >
-            <span>Quick Demo Evaluation Profiles</span>
-            <span className="text-[#F27D26] font-mono">Pass: Password123!</span>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              id="btn-demo-alex"
-              type="button"
-              disabled={isLoading}
-              onClick={() => handleDemoLogin('Alex')}
-              className={`rounded-lg border px-2 py-1.5 text-xs transition disabled:opacity-50 ${
-                isDark
-                  ? 'border-white/10 bg-[#0C0C0C] text-white/70 hover:border-[#F27D26]/50 hover:bg-[#F27D26]/10 hover:text-white'
-                  : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-[#F27D26]/50 hover:bg-[#F27D26]/10 hover:text-zinc-950'
-              }`}
-            >
-              {activeDemo === 'Alex' ? 'Signing in...' : 'Alex (8.42s)'}
-            </button>
-            <button
-              id="btn-demo-john"
-              type="button"
-              disabled={isLoading}
-              onClick={() => handleDemoLogin('John')}
-              className={`rounded-lg border px-2 py-1.5 text-xs transition disabled:opacity-50 ${
-                isDark
-                  ? 'border-white/10 bg-[#0C0C0C] text-white/70 hover:border-[#F27D26]/50 hover:bg-[#F27D26]/10 hover:text-white'
-                  : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-[#F27D26]/50 hover:bg-[#F27D26]/10 hover:text-zinc-950'
-              }`}
-            >
-              {activeDemo === 'John' ? 'Signing in...' : 'John (9.15s)'}
-            </button>
-            <button
-              id="btn-demo-sarah"
-              type="button"
-              disabled={isLoading}
-              onClick={() => handleDemoLogin('Sarah')}
-              className={`rounded-lg border px-2 py-1.5 text-xs transition disabled:opacity-50 ${
-                isDark
-                  ? 'border-white/10 bg-[#0C0C0C] text-white/70 hover:border-[#F27D26]/50 hover:bg-[#F27D26]/10 hover:text-white'
-                  : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-[#F27D26]/50 hover:bg-[#F27D26]/10 hover:text-zinc-950'
-              }`}
-            >
-              {activeDemo === 'Sarah' ? 'Signing in...' : 'Sarah (9.87s)'}
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

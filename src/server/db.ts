@@ -1,15 +1,78 @@
 import bcrypt from 'bcryptjs';
 import { DBUser, DBGameResult, LeaderboardEntry, GlobalStats } from './types.js';
 
+// Legacy mock user IDs to purge
+const MOCK_USER_IDS = new Set(['user-alex', 'user-john', 'user-sarah', 'user-emily', 'user-michael']);
+
+function getNodeFs() {
+  if (typeof window !== 'undefined') return null;
+  try {
+    // Safely load Node fs without bundler warnings
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    return Function('return typeof require !== "undefined" ? require("fs") : null')();
+  } catch {
+    return null;
+  }
+}
+
+function getNodePath() {
+  if (typeof window !== 'undefined') return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    return Function('return typeof require !== "undefined" ? require("path") : null')();
+  } catch {
+    return null;
+  }
+}
+
 class InMemoryDB {
   private users: Map<string, DBUser> = new Map();
   private gameResults: DBGameResult[] = [];
+  private storageFilePath: string | null = null;
 
   constructor() {
+    this.initStoragePath();
     this.loadFromStorage();
   }
 
+  private initStoragePath() {
+    if (typeof window === 'undefined') {
+      const pathModule = getNodePath();
+      if (pathModule) {
+        this.storageFilePath = pathModule.join(process.cwd(), '.data', 'typing_game_db.json');
+      }
+    }
+  }
+
   private loadFromStorage() {
+    // 1. If running on Node.js server, load from durable file store
+    if (typeof window === 'undefined') {
+      const fsModule = getNodeFs();
+      if (fsModule && this.storageFilePath) {
+        try {
+          if (fsModule.existsSync(this.storageFilePath)) {
+            const raw = fsModule.readFileSync(this.storageFilePath, 'utf-8');
+            const data = JSON.parse(raw);
+            if (data && Array.isArray(data.users)) {
+              for (const u of data.users) {
+                if (!MOCK_USER_IDS.has(u.id)) {
+                  this.users.set(u.id, u);
+                }
+              }
+            }
+            if (data && Array.isArray(data.gameResults)) {
+              this.gameResults = data.gameResults.filter((g: DBGameResult) => !MOCK_USER_IDS.has(g.userId));
+            }
+            return;
+          }
+        } catch (err) {
+          console.warn('Could not load from Node storage file:', err);
+        }
+      }
+      return;
+    }
+
+    // 2. If running in browser, load from localStorage
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         const savedUsers = localStorage.getItem('typing_speed_db_users');
@@ -18,24 +81,53 @@ class InMemoryDB {
         if (savedUsers) {
           const parsedUsers: DBUser[] = JSON.parse(savedUsers);
           for (const u of parsedUsers) {
-            this.users.set(u.id, u);
+            if (!MOCK_USER_IDS.has(u.id)) {
+              this.users.set(u.id, u);
+            }
           }
         }
         if (savedGames) {
-          this.gameResults = JSON.parse(savedGames);
+          const parsedGames: DBGameResult[] = JSON.parse(savedGames);
+          this.gameResults = parsedGames.filter((g) => !MOCK_USER_IDS.has(g.userId));
         }
-        if (this.users.size > 0) {
-          return;
-        }
+
+        // Clean any cached mock entries from localStorage
+        this.saveToStorage();
       } catch (err) {
-        console.warn('Could not load from localStorage:', err);
+        console.warn('Could not load from browser localStorage:', err);
       }
     }
-
-    this.seedInitialData();
   }
 
   private saveToStorage() {
+    // 1. If running on Node.js server, save to durable file store
+    if (typeof window === 'undefined') {
+      const fsModule = getNodeFs();
+      const pathModule = getNodePath();
+      if (fsModule && pathModule && this.storageFilePath) {
+        try {
+          const dir = pathModule.dirname(this.storageFilePath);
+          if (!fsModule.existsSync(dir)) {
+            fsModule.mkdirSync(dir, { recursive: true });
+          }
+          const payload = JSON.stringify(
+            {
+              users: Array.from(this.users.values()),
+              gameResults: this.gameResults,
+              lastUpdated: new Date().toISOString(),
+            },
+            null,
+            2
+          );
+          fsModule.writeFileSync(this.storageFilePath, payload, 'utf-8');
+        } catch (err) {
+          console.warn('Could not save to Node storage file:', err);
+        }
+      }
+      return;
+    }
+
+    // 2. If running in browser, save to localStorage
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         localStorage.setItem(
@@ -44,48 +136,8 @@ class InMemoryDB {
         );
         localStorage.setItem('typing_speed_db_games', JSON.stringify(this.gameResults));
       } catch (err) {
-        console.warn('Could not save to localStorage:', err);
+        console.warn('Could not save to browser localStorage:', err);
       }
-    }
-  }
-
-  private async seedInitialData() {
-    const defaultPasswordHash = bcrypt.hashSync('Password123!', 6);
-
-    // Initial users corresponding to the assignment problem statement example
-    const seedUsers = [
-      { id: 'user-alex', username: 'Alex', email: 'alex@example.com', bestScore: 8.42 },
-      { id: 'user-john', username: 'John', email: 'john@example.com', bestScore: 9.15 },
-      { id: 'user-sarah', username: 'Sarah', email: 'sarah@example.com', bestScore: 9.87 },
-      { id: 'user-emily', username: 'Emily', email: 'emily@example.com', bestScore: 10.45 },
-      { id: 'user-michael', username: 'Michael', email: 'michael@example.com', bestScore: 11.20 },
-    ];
-
-    for (const u of seedUsers) {
-      const user: DBUser = {
-        id: u.id,
-        username: u.username,
-        email: u.email,
-        passwordHash: defaultPasswordHash,
-        createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-        bestScore: u.bestScore,
-      };
-      this.users.set(user.id, user);
-
-      // Seed historical game result for leaderboard
-      this.gameResults.push({
-        id: `game-${u.id}-1`,
-        userId: u.id,
-        username: u.username,
-        totalTime: u.bestScore,
-        rawTime: Number((u.bestScore - 0.5).toFixed(2)),
-        penaltyTime: 0.5,
-        correctChars: 20,
-        wrongAttempts: 1,
-        sequence: 'WZXKLPQRMBNTAFGHJKLY',
-        isNewBestScore: true,
-        createdAt: new Date(Date.now() - 3600000 * Math.floor(Math.random() * 24 + 1)).toISOString(),
-      });
     }
   }
 

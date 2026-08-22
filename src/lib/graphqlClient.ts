@@ -52,10 +52,6 @@ export async function executeGraphQL<T = any>(
   variables: Record<string, any> = {},
   retries = 1
 ): Promise<T> {
-  if (useDirectEngine) {
-    return executeLocalGraphQL<T>(query, variables);
-  }
-
   const token = getAuthToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -76,9 +72,8 @@ export async function executeGraphQL<T = any>(
       });
 
       if (response.status === 404 || response.status === 405 || response.status === 502) {
-        // Server endpoint not active (e.g. deployed on static host like Netlify)
-        useDirectEngine = true;
-        return executeLocalGraphQL<T>(query, variables);
+        // Server endpoint not active on static preview host -> fallback for this request
+        return await executeLocalGraphQL<T>(query, variables);
       }
 
       let json: any = {};
@@ -86,8 +81,7 @@ export async function executeGraphQL<T = any>(
         json = await response.json();
       } catch (err) {
         if (!response.ok) {
-          useDirectEngine = true;
-          return executeLocalGraphQL<T>(query, variables);
+          return await executeLocalGraphQL<T>(query, variables);
         }
         throw new Error('Failed to parse response from server');
       }
@@ -97,12 +91,14 @@ export async function executeGraphQL<T = any>(
         throw new Error(message);
       }
 
-      return json ? json.data : null;
+      return json ? (json.data as T) : (null as unknown as T);
     } catch (err: any) {
       lastError = err;
-      if (err?.name === 'TypeError' || (err?.message && (err.message.includes('fetch') || err.message.includes('Failed to fetch')))) {
-        useDirectEngine = true;
-        return executeLocalGraphQL<T>(query, variables);
+      if (
+        err?.name === 'TypeError' ||
+        (err?.message && (err.message.includes('fetch') || err.message.includes('Failed to fetch')))
+      ) {
+        return await executeLocalGraphQL<T>(query, variables);
       }
       if (attempt < retries) {
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -110,9 +106,8 @@ export async function executeGraphQL<T = any>(
     }
   }
 
-  // If network calls fail, gracefully fall back to local direct engine
+  // If network calls fail, gracefully fall back to local direct engine for this invocation
   try {
-    useDirectEngine = true;
     return await executeLocalGraphQL<T>(query, variables);
   } catch (fallbackErr) {
     throw lastError || fallbackErr || new Error('GraphQL request failed');

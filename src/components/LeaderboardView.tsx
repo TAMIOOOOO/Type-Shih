@@ -25,6 +25,7 @@ interface LeaderboardViewProps {
 const CACHE_LEADERBOARD_KEY = 'typing_speed_cache_leaderboard';
 const CACHE_STATS_KEY = 'typing_speed_cache_stats';
 const CACHE_MY_RANK_KEY = 'typing_speed_cache_my_rank';
+const MOCK_USER_IDS = new Set(['user-alex', 'user-john', 'user-sarah', 'user-emily', 'user-michael']);
 
 export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   currentUser,
@@ -37,7 +38,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
     try {
       const cached = localStorage.getItem(CACHE_LEADERBOARD_KEY);
-      return cached ? JSON.parse(cached).slice(0, 50) : [];
+      if (!cached) return [];
+      const parsed: LeaderboardEntry[] = JSON.parse(cached);
+      return parsed.filter((e) => !MOCK_USER_IDS.has(e.userId)).slice(0, 50);
     } catch {
       return [];
     }
@@ -47,7 +50,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   const [myRank, setMyRank] = useState<LeaderboardEntry | null>(() => {
     try {
       const cached = localStorage.getItem(CACHE_MY_RANK_KEY);
-      return cached ? JSON.parse(cached) : null;
+      if (!cached) return null;
+      const parsed: LeaderboardEntry = JSON.parse(cached);
+      return MOCK_USER_IDS.has(parsed.userId) ? null : parsed;
     } catch {
       return null;
     }
@@ -556,13 +561,33 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
                 </tr>
               ) : paginatedEntries.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={5}
-                    className={`py-12 text-center text-xs uppercase tracking-wider ${
-                      isDark ? 'text-white/40' : 'text-zinc-400'
-                    }`}
-                  >
-                    No players found matching &ldquo;{searchQuery}&rdquo;.
+                  <td colSpan={5} className="py-16 text-center">
+                    <div className="flex flex-col items-center justify-center space-y-3">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${
+                        isDark ? 'border-white/10 bg-white/5 text-white/30' : 'border-zinc-200 bg-zinc-100 text-zinc-400'
+                      }`}>
+                        <Trophy className="h-6 w-6" />
+                      </div>
+                      <div className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-zinc-900'}`}>
+                        {searchQuery ? `No players found matching "${searchQuery}"` : 'No Records on Global Leaderboard Yet'}
+                      </div>
+                      <p className={`text-xs max-w-sm ${isDark ? 'text-white/40' : 'text-zinc-500'}`}>
+                        {searchQuery
+                          ? 'Try searching with a different typist handle or clear the filter.'
+                          : 'Be the first typist to complete the speed challenge and claim Rank #1!'}
+                      </p>
+                      {!searchQuery && (
+                        <button
+                          id="btn-empty-play"
+                          type="button"
+                          onClick={onPlayClick}
+                          className="mt-2 inline-flex items-center space-x-2 rounded-xl bg-[#F27D26] px-4 py-2 text-xs font-bold text-black shadow-md shadow-[#F27D26]/20 hover:bg-[#ff8b38] transition"
+                        >
+                          <Zap className="h-4 w-4 fill-current" />
+                          <span>Set First High Score</span>
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (
