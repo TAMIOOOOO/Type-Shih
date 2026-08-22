@@ -18,6 +18,8 @@ interface HistoryViewProps {
   theme?: Theme;
 }
 
+const CACHE_HISTORY_KEY = 'typing_speed_cache_history';
+
 export const HistoryView: React.FC<HistoryViewProps> = ({
   currentUser,
   onOpenAuth,
@@ -25,17 +27,34 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   theme = 'dark',
 }) => {
   const isDark = theme === 'dark';
-  const [history, setHistory] = useState<GameResult[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [history, setHistory] = useState<GameResult[]>(() => {
+    try {
+      const cached = localStorage.getItem(CACHE_HISTORY_KEY);
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(() => history.length === 0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (force = false) => {
     if (!currentUser) return;
-    setIsLoading(true);
+    if (history.length === 0 || force) {
+      setIsLoading(true);
+    }
     setErrorMessage(null);
     try {
-      const data = await executeGraphQL(GAME_HISTORY_QUERY, { limit: 50 });
-      setHistory(Array.isArray(data?.gameHistory) ? data.gameHistory : []);
+      const data = await executeGraphQL(
+        GAME_HISTORY_QUERY,
+        { limit: 50 },
+        { forceRefresh: force, ttlMs: 45000 }
+      );
+      const list = Array.isArray(data?.gameHistory) ? data.gameHistory : [];
+      setHistory(list);
+      try {
+        localStorage.setItem(CACHE_HISTORY_KEY, JSON.stringify(list));
+      } catch {}
     } catch (err: any) {
       console.error('Failed to fetch user game history:', err);
       setErrorMessage(err?.message || 'Failed to fetch game history');
@@ -46,9 +65,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   useEffect(() => {
     if (currentUser) {
-      fetchHistory();
+      fetchHistory(false);
     }
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   if (!currentUser) {
     return (
@@ -134,7 +153,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         <div className="flex items-center space-x-3">
           <button
             id="btn-refresh-history"
-            onClick={fetchHistory}
+            onClick={() => fetchHistory(true)}
             disabled={isLoading}
             className={`flex items-center space-x-1.5 rounded-xl border px-3.5 py-2 text-xs font-medium transition disabled:opacity-50 ${
               isDark

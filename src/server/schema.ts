@@ -57,7 +57,10 @@ export const typeDefs = /* GraphQL */ `
   type GameResultPayload {
     gameResult: GameResult!
     isNewBestScore: Boolean!
+    isLeaderboardBeaten: Boolean!
     userBestScore: Float
+    prevRank: Int
+    newRank: Int
   }
 
   input RegisterInput {
@@ -270,7 +273,7 @@ export const resolvers = {
         });
       }
 
-      const { result, isNewBestScore } = db.saveGameResult({
+      const { result, isNewBestScore, isLeaderboardBeaten, prevRank, newRank } = db.saveGameResult({
         userId: context.user.id,
         rawTime: input.rawTime,
         wrongAttempts: input.wrongAttempts,
@@ -283,7 +286,10 @@ export const resolvers = {
       return {
         gameResult: result,
         isNewBestScore,
+        isLeaderboardBeaten,
         userBestScore: updatedUser?.bestScore || null,
+        prevRank,
+        newRank,
       };
     },
   },

@@ -504,5 +504,73 @@ export async function runAllTests(): Promise<TestResult[]> {
     }
   });
 
+  // ---------------------------------------------------------------------------
+  // 11. High Score Beat & Conditional Leaderboard Updates
+  // ---------------------------------------------------------------------------
+  await test('High Score Beat Verification', "Checks if user's high score is beaten first, then verifies if score beats someone on leaderboard before updating", () => {
+    const leaderUser = db.createUser({
+      username: `TargetLeader_${Date.now()}`,
+      email: `leader_${Date.now()}@test.com`,
+      passwordHash: 'dummy-hash',
+    });
+    // Leader sets an 8.0s time
+    db.saveGameResult({
+      userId: leaderUser.id,
+      rawTime: 8.0,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+
+    const challenger = db.createUser({
+      username: `Challenger_${Date.now()}`,
+      email: `challenger_${Date.now()}@test.com`,
+      passwordHash: 'dummy-hash',
+    });
+
+    // 1) Challenger plays first game: 12.0s -> new personal best, but did not beat the 8.0s leader
+    const res1 = db.saveGameResult({
+      userId: challenger.id,
+      rawTime: 12.0,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+    if (!res1.isNewBestScore) {
+      throw new Error('Expected first game to be personal best');
+    }
+
+    // 2) Challenger plays slower game: 15.0s -> high score NOT beaten (remains unchanged)
+    const res2 = db.saveGameResult({
+      userId: challenger.id,
+      rawTime: 15.0,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+    if (res2.isNewBestScore !== false) {
+      throw new Error('Expected 15.0s to NOT beat personal best 12.0s');
+    }
+    if (res2.isLeaderboardBeaten !== false) {
+      throw new Error('Expected isLeaderboardBeaten to be false when personal highscore is not beaten');
+    }
+
+    // 3) Challenger plays winning game: 6.5s -> beats personal best AND beats leader (8.0s)!
+    const res3 = db.saveGameResult({
+      userId: challenger.id,
+      rawTime: 6.5,
+      wrongAttempts: 0,
+      sequence: 'ABCDEFGHIJKLMNOPQRST',
+    });
+    if (!res3.isNewBestScore) {
+      throw new Error('Expected 6.5s to be marked as new personal best');
+    }
+    if (!res3.isLeaderboardBeaten) {
+      throw new Error('Expected 6.5s to be flagged as beating someone on the leaderboard');
+    }
+    const leaderRank = db.getUserRank(leaderUser.id)?.rank;
+    const challengerRank = db.getUserRank(challenger.id)?.rank;
+    if (!leaderRank || !challengerRank || challengerRank >= leaderRank) {
+      throw new Error(`Expected challenger (rank ${challengerRank}) to be ahead of leader (rank ${leaderRank})`);
+    }
+  });
+
   return results;
 }

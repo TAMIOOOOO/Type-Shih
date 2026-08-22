@@ -84,21 +84,43 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(() => leaderboard.length === 0);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isLiveAutoRefresh, setIsLiveAutoRefresh] = useState<boolean>(true);
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
 
+  // In-memory cache tracking to avoid repetitive fetching for the same timeframe
+  const lastFetchedRef = React.useRef<Record<string, number>>({});
+
   const fetchLeaderboardData = useCallback(
-    async (silent = false) => {
+    async (options?: { silent?: boolean; force?: boolean }) => {
+      const silent = options?.silent ?? false;
+      const force = options?.force ?? false;
+
+      const now = Date.now();
+      const lastTime = lastFetchedRef.current[timeframe] || 0;
+      // Skip if fetched less than 30 seconds ago unless forced (e.g. manual refresh or beaten score)
+      if (!force && leaderboard.length > 0 && now - lastTime < 30000) {
+        return;
+      }
+
       if (!silent && leaderboard.length === 0) setIsLoading(true);
       setErrorMessage(null);
       try {
         const [lbData, statsData] = await Promise.all([
-          executeGraphQL(LEADERBOARD_QUERY, { limit: 50, timeframe }),
-          executeGraphQL(STATS_QUERY),
+          executeGraphQL(
+            LEADERBOARD_QUERY,
+            { limit: 50, timeframe },
+            { forceRefresh: force, ttlMs: 45000 }
+          ),
+          executeGraphQL(
+            STATS_QUERY,
+            {},
+            { forceRefresh: force, ttlMs: 45000 }
+          ),
         ]);
+
+        lastFetchedRef.current[timeframe] = Date.now();
 
         if (lbData?.leaderboard && Array.isArray(lbData.leaderboard)) {
           const validEntries = lbData.leaderboard
@@ -152,50 +174,60 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         if (!silent) setIsLoading(false);
       }
     },
-    [currentUser?.id, leaderboard.length, timeframe]
+    [currentUser?.id, timeframe, leaderboard.length]
   );
 
-  // Initial & Timeframe change fetch
+  // Timeframe change or initial load: restore from cache first, then fetch if needed
   useEffect(() => {
-    fetchLeaderboardData();
-  }, [fetchLeaderboardData]);
+    try {
+      const cached = localStorage.getItem(`${CACHE_LEADERBOARD_PREFIX}${timeframe}`);
+      if (cached) {
+        const parsed: LeaderboardEntry[] = JSON.parse(cached);
+        const filtered = parsed.filter((e) => !MOCK_USER_IDS.has(e.userId)).slice(0, 50);
+        if (filtered.length > 0) {
+          setLeaderboard(filtered);
+        }
+      }
+      const cachedRank = localStorage.getItem(`${CACHE_MY_RANK_PREFIX}${timeframe}`);
+      if (cachedRank) {
+        const parsedRank: LeaderboardEntry = JSON.parse(cachedRank);
+        if (!MOCK_USER_IDS.has(parsedRank.userId)) {
+          setMyRank(parsedRank);
+        }
+      }
+    } catch {}
 
-  // Real-time broadcast channel & event synchronization
+    fetchLeaderboardData();
+  }, [timeframe]);
+
+  // Real-time broadcast channel & event synchronization (triggers when someone's highscore is beaten)
   useEffect(() => {
     const handleSyncEvent = () => {
-      fetchLeaderboardData(true);
+      // Background refresh with force flag when high score is beaten
+      fetchLeaderboardData({ silent: true, force: true });
     };
 
     window.addEventListener('typing_speed_leaderboard_sync', handleSyncEvent);
-    window.addEventListener('focus', handleSyncEvent);
 
     let channel: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         channel = new BroadcastChannel('typing_speed_sync_channel');
-        channel.onmessage = () => {
-          fetchLeaderboardData(true);
+        channel.onmessage = (msgEvent) => {
+          if (msgEvent.data?.type === 'LEADERBOARD_SCORE_BEATEN') {
+            fetchLeaderboardData({ silent: true, force: true });
+          }
         };
       } catch {}
     }
 
     return () => {
       window.removeEventListener('typing_speed_leaderboard_sync', handleSyncEvent);
-      window.removeEventListener('focus', handleSyncEvent);
       if (channel) {
         channel.close();
       }
     };
   }, [fetchLeaderboardData]);
-
-  // Real-time background auto-refresh polling
-  useEffect(() => {
-    if (!isLiveAutoRefresh) return;
-    const interval = setInterval(() => {
-      fetchLeaderboardData(true);
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [fetchLeaderboardData, isLiveAutoRefresh]);
 
   // Filtered leaderboard (max 50)
   const filteredLeaderboard = useMemo(() => {
@@ -282,32 +314,23 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Live Sync Toggle */}
-          <button
-            id="btn-toggle-live-sync"
-            onClick={() => setIsLiveAutoRefresh(!isLiveAutoRefresh)}
-            className={`flex items-center space-x-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition ${
-              isLiveAutoRefresh
-                ? isDark
-                  ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300'
-                  : 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                : isDark
-                ? 'border-white/10 bg-[#0C0C0C] text-white/40 hover:text-white'
-                : 'border-zinc-200 bg-zinc-100 text-zinc-600 hover:text-zinc-950'
+          {/* Smart Sync Indicator */}
+          <div
+            id="status-smart-sync"
+            className={`flex items-center space-x-1.5 rounded-xl border px-3 py-2 text-xs font-medium ${
+              isDark
+                ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-300'
+                : 'border-emerald-300 bg-emerald-50 text-emerald-800'
             }`}
-            title="Toggles background multi-client live sync polling"
+            title="Leaderboard updates when a player's score beats a high score on the leaderboard"
           >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                isLiveAutoRefresh ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'
-              }`}
-            />
-            <span>{isLiveAutoRefresh ? 'Live Sync Active' : 'Live Sync Paused'}</span>
-          </button>
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Smart Sync (Updates on Beaten Scores)</span>
+          </div>
 
           <button
             id="btn-refresh-leaderboard"
-            onClick={() => fetchLeaderboardData(false)}
+            onClick={() => fetchLeaderboardData({ silent: false, force: true })}
             disabled={isLoading}
             className={`flex items-center space-x-1.5 rounded-xl border px-3.5 py-2 text-xs font-medium transition disabled:opacity-50 ${
               isDark

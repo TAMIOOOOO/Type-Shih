@@ -206,7 +206,13 @@ class InMemoryDB {
     wrongAttempts: number;
     sequence: string;
     correctChars?: number;
-  }): { result: DBGameResult; isNewBestScore: boolean } {
+  }): {
+    result: DBGameResult;
+    isNewBestScore: boolean;
+    isLeaderboardBeaten: boolean;
+    prevRank: number | null;
+    newRank: number | null;
+  } {
     const user = this.findUserById(params.userId);
     if (!user) {
       throw new Error('User not found');
@@ -218,10 +224,26 @@ class InMemoryDB {
 
     // Check if new best score (lower completion time is better score)
     const isNewBestScore = user.bestScore === null || totalTime < user.bestScore;
+    const prevRank = this.getUserRank(user.id)?.rank ?? null;
+
+    // Check if this score beats someone else's high score on the leaderboard
+    let isLeaderboardBeaten = false;
 
     if (isNewBestScore) {
       user.bestScore = totalTime;
       this.users.set(user.id, user);
+
+      // Check if there is another player whose best score was beaten by this time
+      const otherUsers = Array.from(this.users.values()).filter(
+        (u) => u.id !== user.id && u.bestScore !== null
+      );
+      const hasBeatenOther = otherUsers.some((u) => totalTime < (u.bestScore as number));
+
+      const newRank = this.getUserRank(user.id)?.rank ?? null;
+      isLeaderboardBeaten =
+        hasBeatenOther ||
+        (prevRank !== null && newRank !== null && newRank < prevRank) ||
+        (prevRank === null && newRank !== null && newRank <= 50);
     }
 
     const gameResult: DBGameResult = {
@@ -241,7 +263,15 @@ class InMemoryDB {
     this.gameResults.unshift(gameResult);
     this.saveToStorage();
 
-    return { result: gameResult, isNewBestScore };
+    const newRank = this.getUserRank(user.id)?.rank ?? null;
+
+    return {
+      result: gameResult,
+      isNewBestScore,
+      isLeaderboardBeaten,
+      prevRank,
+      newRank,
+    };
   }
 
   // User Game History (private to user)

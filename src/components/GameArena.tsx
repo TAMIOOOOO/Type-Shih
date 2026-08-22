@@ -235,7 +235,7 @@ export const GameArena: React.FC<GameArenaProps> = ({
         setIsSavingToBackend(true);
         setSaveError(null);
         try {
-          await executeGraphQL(SAVE_GAME_MUTATION, {
+          const saveRes: any = await executeGraphQL(SAVE_GAME_MUTATION, {
             input: {
               rawTime: Number(finalRawTime.toFixed(2)),
               wrongAttempts: finalWrongAttempts,
@@ -244,15 +244,46 @@ export const GameArena: React.FC<GameArenaProps> = ({
             },
           });
 
-          // Broadcast real-time sync notification across tabs and components
-          try {
-            window.dispatchEvent(new CustomEvent('typing_speed_leaderboard_sync'));
-            if (typeof BroadcastChannel !== 'undefined') {
-              const channel = new BroadcastChannel('typing_speed_sync_channel');
-              channel.postMessage({ type: 'MATCH_COMPLETED', timestamp: Date.now() });
-              channel.close();
+          // STEP 1: Check if the user's high score was beaten
+          // STEP 2: If beaten, check if the score has beaten someone's high score on the leaderboard
+          if (isNewBest) {
+            let beatSomeoneOnLeaderboard = Boolean(saveRes?.saveGameResult?.isLeaderboardBeaten);
+
+            // Client-side fallback check against cached leaderboard
+            if (!beatSomeoneOnLeaderboard) {
+              try {
+                const cached = localStorage.getItem('typing_speed_cache_lb_ALL_TIME');
+                if (cached) {
+                  const cachedLb: any[] = JSON.parse(cached);
+                  beatSomeoneOnLeaderboard = cachedLb.some(
+                    (entry) => entry.userId !== currentUser.id && finalTotalTime < entry.bestTime
+                  );
+                }
+              } catch {}
             }
-          } catch {}
+
+            // STEP 3: If YES, update the interface. If NOT, remain as is to avoid lapses in the interface
+            if (beatSomeoneOnLeaderboard) {
+              try {
+                window.dispatchEvent(
+                  new CustomEvent('typing_speed_leaderboard_sync', {
+                    detail: { beaten: true, newTime: finalTotalTime, user: currentUser.username },
+                  })
+                );
+                if (typeof BroadcastChannel !== 'undefined') {
+                  const channel = new BroadcastChannel('typing_speed_sync_channel');
+                  channel.postMessage({
+                    type: 'LEADERBOARD_SCORE_BEATEN',
+                    timestamp: Date.now(),
+                    userId: currentUser.id,
+                    newTime: finalTotalTime,
+                  });
+                  channel.close();
+                }
+              } catch {}
+            }
+          }
+          // If highscore is not beaten, or didn't beat someone else's score: remain without triggering UI lapses.
         } catch (err: any) {
           // Log user-friendly notice without breaking game completion
           setSaveError(err?.message || 'Failed to sync with server');

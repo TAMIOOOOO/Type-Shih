@@ -5,7 +5,7 @@ import { LeaderboardView } from './components/LeaderboardView.js';
 import { HistoryView } from './components/HistoryView.js';
 import { AuthModal } from './components/AuthModal.js';
 import { User, Theme } from './types.js';
-import { executeGraphQL, ME_QUERY, removeAuthToken } from './lib/graphqlClient.js';
+import { executeGraphQL, ME_QUERY, getAuthToken, removeAuthToken } from './lib/graphqlClient.js';
 
 const LOCAL_STORAGE_BEST_KEY = 'typing_speed_best_score';
 const LOCAL_STORAGE_THEME_KEY = 'typing_speed_theme';
@@ -44,6 +44,9 @@ export default function App() {
   // Check auth session on startup
   useEffect(() => {
     async function checkAuth() {
+      const token = getAuthToken();
+      if (!token) return;
+
       try {
         const data = await executeGraphQL(ME_QUERY);
         if (data && data.me) {

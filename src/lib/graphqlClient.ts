@@ -11,13 +11,47 @@ export function getAuthToken(): string | null {
 
 export function setAuthToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  clearGraphQLCache();
 }
 
 export function removeAuthToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  clearGraphQLCache();
 }
 
-let useDirectEngine = false;
+// In-Memory Query Cache & In-Flight Request Deduplication
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+  ttl: number;
+}
+
+const queryCache = new Map<string, CacheEntry<any>>();
+const inFlightRequests = new Map<string, Promise<any>>();
+
+export function clearGraphQLCache(): void {
+  queryCache.clear();
+  inFlightRequests.clear();
+}
+
+export function invalidateGraphQLCache(pattern?: string): void {
+  if (!pattern) {
+    queryCache.clear();
+    return;
+  }
+  for (const key of queryCache.keys()) {
+    if (key.includes(pattern)) {
+      queryCache.delete(key);
+    }
+  }
+}
+
+export interface ExecuteOptions {
+  skipCache?: boolean;
+  forceRefresh?: boolean;
+  ttlMs?: number;
+  retries?: number;
+}
 
 async function executeLocalGraphQL<T = any>(
   query: string,
@@ -50,67 +84,121 @@ async function executeLocalGraphQL<T = any>(
 export async function executeGraphQL<T = any>(
   query: string,
   variables: Record<string, any> = {},
-  retries = 1
+  optionsOrRetries?: ExecuteOptions | number
 ): Promise<T> {
+  const options: ExecuteOptions =
+    typeof optionsOrRetries === 'number'
+      ? { retries: optionsOrRetries }
+      : optionsOrRetries || {};
+
+  const retries = options.retries ?? 1;
+  const isMutation = query.trim().startsWith('mutation');
   const token = getAuthToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+  // Create unique cache key for queries
+  const cacheKey = `${query.replace(/\s+/g, ' ').trim()}::${JSON.stringify(variables)}::${token || 'guest'}`;
 
-  let lastError: any = null;
+  // If this is a mutation, invalidate query cache to guarantee fresh state
+  if (isMutation) {
+    clearGraphQLCache();
+  } else if (!options.forceRefresh && !options.skipCache) {
+    // 1. Check in-memory cache
+    const cached = queryCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < cached.ttl) {
+      return cached.data as T;
+    }
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const response = await fetch('/api/graphql', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ query, variables }),
-      });
-
-      if (response.status === 404 || response.status === 405 || response.status === 502) {
-        // Server endpoint not active on static preview host -> fallback for this request
-        return await executeLocalGraphQL<T>(query, variables);
-      }
-
-      let json: any = {};
-      try {
-        json = await response.json();
-      } catch (err) {
-        if (!response.ok) {
-          return await executeLocalGraphQL<T>(query, variables);
-        }
-        throw new Error('Failed to parse response from server');
-      }
-
-      if (json && Array.isArray(json.errors) && json.errors.length > 0) {
-        const message = json.errors[0]?.message || 'GraphQL execution failed';
-        throw new Error(message);
-      }
-
-      return json ? (json.data as T) : (null as unknown as T);
-    } catch (err: any) {
-      lastError = err;
-      if (
-        err?.name === 'TypeError' ||
-        (err?.message && (err.message.includes('fetch') || err.message.includes('Failed to fetch')))
-      ) {
-        return await executeLocalGraphQL<T>(query, variables);
-      }
-      if (attempt < retries) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
+    // 2. Check in-flight deduplication promise
+    const existingPromise = inFlightRequests.get(cacheKey);
+    if (existingPromise) {
+      return existingPromise as Promise<T>;
     }
   }
 
-  // If network calls fail, gracefully fall back to local direct engine for this invocation
+  const fetchPromise = (async (): Promise<T> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch('/api/graphql', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ query, variables }),
+        });
+
+        if (response.status === 404 || response.status === 405 || response.status === 502) {
+          // Server endpoint not active on static preview host -> fallback for this request
+          return await executeLocalGraphQL<T>(query, variables);
+        }
+
+        let json: any = {};
+        try {
+          json = await response.json();
+        } catch (err) {
+          if (!response.ok) {
+            return await executeLocalGraphQL<T>(query, variables);
+          }
+          throw new Error('Failed to parse response from server');
+        }
+
+        if (json && Array.isArray(json.errors) && json.errors.length > 0) {
+          const message = json.errors[0]?.message || 'GraphQL execution failed';
+          throw new Error(message);
+        }
+
+        return json ? (json.data as T) : (null as unknown as T);
+      } catch (err: any) {
+        lastError = err;
+        if (
+          err?.name === 'TypeError' ||
+          (err?.message && (err.message.includes('fetch') || err.message.includes('Failed to fetch')))
+        ) {
+          return await executeLocalGraphQL<T>(query, variables);
+        }
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+    }
+
+    // If network calls fail, gracefully fall back to local direct engine for this invocation
+    try {
+      return await executeLocalGraphQL<T>(query, variables);
+    } catch (fallbackErr) {
+      throw lastError || fallbackErr || new Error('GraphQL request failed');
+    }
+  })();
+
+  if (!isMutation && !options.skipCache) {
+    inFlightRequests.set(cacheKey, fetchPromise);
+  }
+
   try {
-    return await executeLocalGraphQL<T>(query, variables);
-  } catch (fallbackErr) {
-    throw lastError || fallbackErr || new Error('GraphQL request failed');
+    const result = await fetchPromise;
+
+    // Cache the resolved result for queries
+    if (!isMutation && !options.skipCache && result) {
+      queryCache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now(),
+        ttl: options.ttlMs || 45000, // 45 seconds default TTL
+      });
+    }
+
+    return result;
+  } finally {
+    if (!isMutation && !options.skipCache) {
+      inFlightRequests.delete(cacheKey);
+    }
   }
 }
 
@@ -250,7 +338,10 @@ export const SAVE_GAME_MUTATION = /* GraphQL */ `
         createdAt
       }
       isNewBestScore
+      isLeaderboardBeaten
       userBestScore
+      prevRank
+      newRank
     }
   }
 `;
